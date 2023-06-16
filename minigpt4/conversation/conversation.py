@@ -12,6 +12,10 @@ from typing import List, Tuple, Any
 
 from minigpt4.common.registry import registry
 
+import time
+from io import BytesIO
+import requests
+
 
 class SeparatorStyle(Enum):
     """Different separator style."""
@@ -117,7 +121,6 @@ CONV_VISION = Conversation(
 )
 
 
-
 class Chat:
     def __init__(self, model, vis_processor, device='cuda:0'):
         self.device = device
@@ -147,6 +150,7 @@ class Chat:
 
         embs = embs[:, begin_idx:]
 
+        start_time = time.time()
         outputs = self.model.llama_model.generate(
             inputs_embeds=embs,
             max_new_tokens=max_new_tokens,
@@ -159,12 +163,16 @@ class Chat:
             length_penalty=length_penalty,
             temperature=temperature,
         )
+        elapsed_time = time.time() - start_time
+        print(f"Elapsed time: {elapsed_time:.2f} seconds")
+
         output_token = outputs[0]
         if output_token[0] == 0:  # the model might output a unknow token <unk> at the beginning. remove it
             output_token = output_token[1:]
         if output_token[0] == 1:  # some users find that there is a start token <s> at the beginning. remove it
             output_token = output_token[1:]
         output_text = self.model.llama_tokenizer.decode(output_token, add_special_tokens=False)
+        print(output_text)
         output_text = output_text.split('###')[0]  # remove the stop sign '###'
         output_text = output_text.split('Assistant:')[-1].strip()
         conv.messages[-1][1] = output_text
@@ -172,7 +180,11 @@ class Chat:
 
     def upload_img(self, image, conv, img_list):
         if isinstance(image, str):  # is a image path
-            raw_image = Image.open(image).convert('RGB')
+            if image.startswith('http://') or image.startswith('https://'):
+                response = requests.get(image, verify=False)
+                raw_image = Image.open(BytesIO(response.content))
+            else:
+                raw_image = Image.open(image).convert('RGB')
             image = self.vis_processor(raw_image).unsqueeze(0).to(self.device)
         elif isinstance(image, Image.Image):
             raw_image = image
@@ -203,5 +215,3 @@ class Chat:
         mixed_embs = [emb for pair in zip(seg_embs[:-1], img_list) for emb in pair] + [seg_embs[-1]]
         mixed_embs = torch.cat(mixed_embs, dim=1)
         return mixed_embs
-
-
